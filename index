@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulasi Fisika Atmosfer Realistis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3, .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Native Fullscreen Styles */
+        #viz-wrapper:fullscreen {
+            width: 100vw;
+            height: 100vh;
+            border-radius: 0;
+            display: flex;
+        }
+
+        #viz-wrapper:fullscreen #canvas-container {
+            height: 100vh;
+            border-radius: 0;
+        }
+
+        /* Fallback Pseudo-Fullscreen Styles */
+        #viz-wrapper.pseudo-fullscreen {
+            position: fixed !important;
+            top: 0;
+            left: 0;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 9999;
+            border-radius: 0 !important;
+            margin: 0 !important;
+        }
+
+        #viz-wrapper.pseudo-fullscreen #canvas-container {
+            height: 100% !important;
+            border-radius: 0 !important;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            border-radius: 0.75rem;
+            background: linear-gradient(to bottom, #38bdf8, #bae6fd);
+            transition: background 2s ease; /* Smooth transition for sky color */
+        }
+
+        .hud-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Gauge Bars replaced with Sliders style */
+        input[type=range] {
+            height: 6px;
+            border-radius: 3px;
+        }
+        /* Custom thumb for smaller HUD sliders */
+        .hud-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: white;
+            cursor: pointer;
+            border: 2px solid currentColor; 
+        }
+
+        /* [UPDATED] Fixed Side Notification Styles */
+        .sim-label {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(4px);
+            color: white;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: bold;
+            text-align: right;
+            border-right: 4px solid #3b82f6; /* Default Blue */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+            
+            /* Animation props */
+            opacity: 0;
+            transform: translateX(20px);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            display: none; /* Hidden by default to not take space */
+            pointer-events: none;
+        }
+
+        .sim-label.visible {
+            opacity: 1;
+            transform: translateX(0);
+            display: block;
+        }
+
+        .sim-label span {
+            display: block;
+            font-size: 10px;
+            color: #94a3b8;
+            font-weight: normal;
+            margin-top: 2px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Color variations for phases */
+        #label-evap { border-color: #f97316; } /* Orange */
+        #label-cond { border-color: #94a3b8; } /* Grey */
+        #label-precip { border-color: #3b82f6; } /* Blue */
+    </style>
+</head>
+<body class="flex flex-col min-h-screen">
+
+    <!-- Header -->
+    <header class="bg-slate-900 border-b border-slate-700 p-4 z-10">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <!-- Reverted to Icon -->
+                <div class="p-2 bg-blue-600 rounded-lg">
+                    <i data-lucide="activity" class="w-6 h-6 text-white"></i>
+                </div>
+                
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-white">SIMULASI <span class="text-blue-400">SIKLUS AIR</span></h1>
+                    <p class="text-xs text-slate-400 mono">v3.2.3 LOGO REMOVED</p>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                 <button onclick="resetSim()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-md text-sm font-bold transition flex items-center gap-2 border border-slate-600">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4"></i> RESET
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow flex flex-col lg:flex-row max-w-7xl mx-auto w-full p-4 gap-4 h-[calc(100vh-80px)]">
+        
+        <!-- 3D Visualization Wrapper -->
+        <div id="viz-wrapper" class="flex-grow relative bg-slate-800 rounded-xl shadow-2xl border border-slate-700 flex flex-col overflow-hidden h-[500px] lg:h-auto group">
+            
+            <button id="btn-fullscreen" class="absolute top-4 right-4 z-20 bg-black/50 hover:bg-black/80 text-white p-2 rounded-lg transition" title="Fullscreen">
+                <i data-lucide="maximize" class="w-5 h-5"></i>
+            </button>
+
+            <!-- [UPDATED] Fixed Side Notification Container -->
+            <div class="absolute top-16 right-4 flex flex-col gap-3 items-end z-10 w-48">
+                <div id="label-evap" class="sim-label">
+                    EVAPORASI
+                    <span>Air menguap menjadi gas</span>
+                </div>
+                <div id="label-cond" class="sim-label">
+                    KONDENSASI
+                    <span>Uap membentuk awan</span>
+                </div>
+                <div id="label-precip" class="sim-label">
+                    PRESIPITASI
+                    <span>Air jatuh ke bumi</span>
+                </div>
+            </div>
+
+            <!-- Live Data HUD (Heads Up Display) -->
+            <div class="absolute top-4 left-4 w-64 hud-panel p-4 rounded-xl z-10 select-none">
+                <h3 class="text-xs font-bold text-slate-400 mb-3 uppercase flex items-center gap-2">
+                    <i data-lucide="cpu" class="w-3 h-3"></i> Kontrol Manual
+                </h3>
+                
+                <!-- Temperature Slider -->
+                <div class="mb-3">
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-slate-300">Suhu Udara</span>
+                        <span id="disp-temp" class="font-bold text-orange-400 mono">25.0°C</span>
+                    </div>
+                    <!-- Range: -10 to 50 degrees -->
+                    <input type="range" id="slider-temp" min="-10" max="50" step="0.1" 
+                           class="hud-slider w-full bg-slate-700 rounded-lg appearance-none cursor-pointer text-orange-500 accent-orange-500">
+                </div>
+
+                <!-- Humidity Slider -->
+                <div class="mb-3">
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-slate-300">Kelembapan (RH)</span>
+                        <span id="disp-humidity" class="font-bold text-blue-400 mono">50%</span>
+                    </div>
+                    <!-- Range: 0 to 100 percent -->
+                    <input type="range" id="slider-humidity" min="0" max="100" step="0.1" 
+                           class="hud-slider w-full bg-slate-700 rounded-lg appearance-none cursor-pointer text-blue-500 accent-blue-500">
+                </div>
+
+                <!-- Soil Moisture Slider -->
+                <div class="mb-3">
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-slate-300">Kadar Air Tanah</span>
+                        <span id="disp-soil" class="font-bold text-green-400 mono">Subur</span>
+                    </div>
+                    <!-- Range: 0 to 100 percent -->
+                    <input type="range" id="slider-soil" min="0" max="100" step="0.1" 
+                           class="hud-slider w-full bg-slate-700 rounded-lg appearance-none cursor-pointer text-green-500 accent-green-500">
+                </div>
+
+                <!-- Status Text -->
+                <div class="mt-4 pt-3 border-t border-slate-700">
+                    <p id="system-status" class="text-xs font-mono text-white animate-pulse">>> SYSTEM: MANUAL</p>
+                </div>
+            </div>
+
+            <div id="canvas-container"></div>
+            
+             <!-- Alerts Overlay Removed -->
+        </div>
+
+        <!-- Controls Panel (Side) -->
+        <div class="w-full lg:w-80 flex flex-col gap-4 overflow-y-auto">
+            
+            <!-- Climate Control Deck -->
+            <div class="hud-panel p-5 rounded-xl border-l-4 border-blue-500">
+                <h2 class="text-sm font-bold text-white mb-4 flex items-center gap-2 uppercase tracking-wide">
+                    <i data-lucide="settings-2" class="w-4 h-4 text-blue-400"></i> Sumber Energi
+                </h2>
+                
+                <div class="space-y-6">
+                    <!-- Sun Heat Slider -->
+                    <div>
+                        <label class="text-xs font-bold text-slate-400 flex justify-between mb-2">
+                            INTENSITAS MATAHARI (Visual)
+                            <span id="val-sun" class="text-white mono">1.0x</span>
+                        </label>
+                        <input type="range" id="input-sun" min="0" max="3" step="0.1" value="1" class="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500 hover:accent-orange-400">
+                        <p class="text-[10px] text-slate-500 mt-1">Mengatur pencahayaan.</p>
+                    </div>
+
+                    <!-- Wind Speed Slider -->
+                    <div>
+                        <label class="text-xs font-bold text-slate-400 flex justify-between mb-2">
+                            KECEPATAN ANGIN
+                            <span id="val-wind" class="text-white mono">10 km/h</span>
+                        </label>
+                        <input type="range" id="input-wind" min="0" max="100" step="5" value="10" class="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500 hover:accent-cyan-400">
+                        <p class="text-[10px] text-slate-500 mt-1">Mempengaruhi pergerakan awan & arah presipitasi.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Simulation Log / Education -->
+            <div class="hud-panel p-5 rounded-xl flex-grow flex flex-col">
+                <h2 class="text-sm font-bold text-white mb-3 flex items-center gap-2 uppercase tracking-wide">
+                    <i data-lucide="book-open" class="w-4 h-4 text-green-400"></i> Penjelasan Proses
+                </h2>
+                <div id="sim-log" class="flex-grow bg-slate-900/50 rounded p-3 text-xs font-mono text-slate-300 overflow-y-auto h-40 space-y-2 border border-slate-700/50">
+                    <div class="text-green-500">[INFO] Siklus Hidrologi Aktif.</div>
+                    <div class="text-slate-400 border-l-2 border-orange-500 pl-2">
+                        <strong class="text-orange-400">1. Evaporasi:</strong> Terjadi saat Suhu > 20°C. Air laut berubah menjadi uap.
+                    </div>
+                    <div class="text-slate-400 border-l-2 border-blue-500 pl-2">
+                        <strong class="text-blue-400">2. Kondensasi:</strong> Terjadi saat Kelembapan meningkat. Uap air mendingin membentuk awan.
+                    </div>
+                    <div class="text-slate-400 border-l-2 border-indigo-500 pl-2">
+                        <strong class="text-indigo-400">3. Presipitasi:</strong> Terjadi saat awan jenuh. Turun sebagai Hujan (>0°C) atau Salju (<0°C).
+                    </div>
+                </div>
+                
+                <div class="mt-4 p-3 bg-blue-900/20 rounded border border-blue-500/30">
+                    <p class="text-[11px] text-blue-200 leading-relaxed">
+                        <strong class="text-blue-400">Tips Eksperimen:</strong> Turunkan suhu hingga di bawah 0°C saat hujan untuk melihat perubahan fase air menjadi <strong>Salju</strong>.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        lucide.createIcons();
+
+        // --- PHYSICS CONSTANTS & STATE ---
+        const CONSTANTS = {
+            EVAP_COEFF: 0.05,
+            CONDENSE_THRESHOLD: 60,
+            RAIN_THRESHOLD: 90,
+            COOLING_RATE: 0.02,
+            SOIL_DRY_RATE: 0.05,
+            SOIL_WET_RATE: 0.5
+        };
+
+        const simState = {
+            sunIntensity: 1.0,
+            windSpeed: 10,
+            temperature: 25.0,
+            humidity: 50.0,
+            cloudDensity: 0.0,
+            soilMoisture: 60.0,
+            isRaining: false,
+            rainIntensity: 0.0,
+            time: 0
+        };
+
+        // --- THREE.JS SETUP ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        const fog = new THREE.FogExp2(0x87CEEB, 0.012);
+        scene.fog = fog;
+
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.set(0, 15, 40);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.maxPolarAngle = Math.PI / 2 - 0.1;
+        controls.minDistance = 15;
+        controls.maxDistance = 60;
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.6); 
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffdfba, 1.2);
+        sunLight.position.set(30, 50, -20);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.set(2048, 2048);
+        scene.add(sunLight);
+
+        // --- ASSETS & PROCEDURAL TEXTURES ---
+        function createTerrainTexture(colorA, colorB) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            for(let i=0; i<5000; i++) {
+                const x = Math.random() * 512;
+                const y = Math.random() * 512;
+                const size = Math.random() * 4 + 1;
+                const shade = Math.random();
+                ctx.fillStyle = shade > 0.5 ? colorA : colorB;
+                ctx.globalAlpha = 0.1 + Math.random() * 0.1;
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI*2);
+                ctx.fill();
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+        const grassTex = createTerrainTexture('#2d5a27', '#1a3b1a');
+        const rockTex = createTerrainTexture('#4a4a4a', '#2a2a2a');
+
+        // --- GEOMETRY GENERATION ---
+        function getNoise(x, z, scale, amplitude) {
+            return Math.sin(x * scale) * Math.cos(z * scale) * amplitude + 
+                   Math.sin(x * scale * 2.5 + z) * Math.cos(z * scale * 2.5) * (amplitude * 0.5);
+        }
+
+        // 1. Ocean
+        const oceanGeo = new THREE.PlaneGeometry(150, 150, 64, 64);
+        const oceanMat = new THREE.MeshStandardMaterial({ 
+            color: 0x005588, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.9 
+        });
+        const ocean = new THREE.Mesh(oceanGeo, oceanMat);
+        ocean.rotation.x = -Math.PI / 2;
+        ocean.receiveShadow = true;
+        scene.add(ocean);
+        
+        const oceanPos = oceanGeo.attributes.position;
+        const oceanInitialZ = [];
+        for(let i=0; i<oceanPos.count; i++) oceanInitialZ.push(oceanPos.getZ(i));
+
+        // 2. Island
+        const landGroup = new THREE.Group();
+        const islandGeo = new THREE.CylinderGeometry(18, 22, 6, 128, 32); 
+        const iPos = islandGeo.attributes.position;
+        for(let i=0; i<iPos.count; i++) {
+            const x = iPos.getX(i);
+            const y = iPos.getY(i);
+            const z = iPos.getZ(i);
+            if (y > -2) {
+                const noiseVal = getNoise(x, z, 0.15, 2.5);
+                const detailVal = getNoise(x, z, 0.5, 0.5);
+                const angle = Math.atan2(z, x);
+                const radiusVar = Math.sin(angle * 5) * 1.5 + Math.cos(angle * 12) * 0.5;
+                if (y > 0) iPos.setY(i, y + noiseVal + detailVal);
+                else {
+                     const rScale = 1 + (radiusVar * 0.02);
+                     iPos.setX(i, x * rScale); iPos.setZ(i, z * rScale);
+                }
+            }
+        }
+        islandGeo.computeVertexNormals();
+        const islandMat = new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1.0, metalness: 0.0, color: 0xffffff });
+        const island = new THREE.Mesh(islandGeo, islandMat);
+        island.position.y = -2;
+        island.receiveShadow = true; island.castShadow = true;
+        landGroup.add(island);
+
+        // 3. Mountain
+        const mountGeo = new THREE.ConeGeometry(9, 15, 64, 32, true); 
+        const mPos = mountGeo.attributes.position;
+        for(let i=0; i<mPos.count; i++) {
+            const x = mPos.getX(i); const y = mPos.getY(i); const z = mPos.getZ(i);
+            const noise = getNoise(x, z, 0.8, 1.2);
+            const spike = getNoise(x, y, 1.2, 0.5);
+            const factor = 1 + (noise + spike) * 0.15;
+            mPos.setX(i, x * factor); mPos.setZ(i, z * factor); mPos.setY(i, y + noise * 0.5);
+        }
+        mountGeo.computeVertexNormals();
+        const mountMat = new THREE.MeshStandardMaterial({ map: rockTex, roughness: 0.9, metalness: 0.1, color: 0x888888 });
+        const mountain = new THREE.Mesh(mountGeo, mountMat);
+        mountain.position.set(-4, 4, -3);
+        mountain.castShadow = true; mountain.receiveShadow = true;
+        landGroup.add(mountain);
+
+        // Snow Cap
+        const snowCapGeo = new THREE.ConeGeometry(3, 4, 32, 8);
+        const sPos = snowCapGeo.attributes.position;
+        for(let i=0; i<sPos.count; i++) {
+             const x = sPos.getX(i); const z = sPos.getZ(i);
+             const n = getNoise(x, z, 1.5, 0.3);
+             sPos.setX(i, x * (1+n)); sPos.setZ(i, z * (1+n));
+        }
+        snowCapGeo.computeVertexNormals();
+        const snowMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+        const snow = new THREE.Mesh(snowCapGeo, snowMat);
+        snow.position.set(-4, 10, -3);
+        landGroup.add(snow);
+
+        // Trees
+        const treeMat = new THREE.MeshStandardMaterial({ color: 0x228b22 });
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033 });
+        const trees = [];
+        function createTree(x, z) {
+            const grp = new THREE.Group();
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 1.5), trunkMat);
+            const leaves = new THREE.Mesh(new THREE.ConeGeometry(1, 2.5, 6), treeMat);
+            leaves.position.y = 1.5; trunk.position.y = 0.75;
+            leaves.rotation.x = (Math.random()-0.5)*0.2; leaves.rotation.z = (Math.random()-0.5)*0.2;
+            grp.add(trunk, leaves);
+            const y = getNoise(x, z, 0.15, 2.5) + getNoise(x, z, 0.5, 0.5) - 2 + 1;
+            grp.position.set(x, Math.max(0, y), z);
+            grp.castShadow = true;
+            return { mesh: grp, leaves: leaves };
+        }
+        [ [5, 3], [7, -2], [3, 6], [-2, 8], [9, 2], [0, 8] ].forEach(pos => {
+            const t = createTree(pos[0], pos[1]); landGroup.add(t.mesh); trees.push(t);
+        });
+        scene.add(landGroup);
+
+        // 4. Clouds
+        const cloudGroup = new THREE.Group();
+        const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.0, depthWrite: false, roughness: 1 });
+        for(let i=0; i<3; i++) {
+            const cGeo = new THREE.SphereGeometry(3 + Math.random(), 8, 8);
+            const mesh = new THREE.Mesh(cGeo, cloudMat);
+            mesh.position.set((Math.random()-0.5)*20, 14 + Math.random()*2, (Math.random()-0.5)*10);
+            mesh.scale.set(1.5, 0.8, 1.2);
+            cloudGroup.add(mesh);
+        }
+        scene.add(cloudGroup);
+
+        // 5. Rain System
+        const rainCount = 4000;
+        const rainGeo = new THREE.BufferGeometry();
+        const rainPos = new Float32Array(rainCount * 2 * 3);
+        for(let i=0; i<rainCount*2*3; i++) rainPos[i] = 0;
+        rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+        const rainMat = new THREE.LineBasicMaterial({ color: 0xcccccc, transparent: true, opacity: 0.8, linewidth: 2 });
+        const rainSystem = new THREE.LineSegments(rainGeo, rainMat);
+        rainSystem.visible = false;
+        scene.add(rainSystem);
+
+        // 6. Snow System (NEW)
+        const snowCount = 2000;
+        const snowParticleGeo = new THREE.BufferGeometry();
+        const snowPos = new Float32Array(snowCount * 3);
+        for(let i=0; i<snowCount*3; i++) snowPos[i] = 0;
+        snowParticleGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
+        const snowMatParticles = new THREE.PointsMaterial({ color: 0xffffff, size: 0.4, transparent: true, opacity: 0.9 });
+        const snowSystem = new THREE.Points(snowParticleGeo, snowMatParticles);
+        snowSystem.visible = false;
+        scene.add(snowSystem);
+
+        // 7. Vapor System (NEW - Evaporation)
+        const vaporCount = 500;
+        const vaporGeo = new THREE.BufferGeometry();
+        const vaporPos = new Float32Array(vaporCount * 3);
+        for(let i=0; i<vaporCount*3; i++) {
+             vaporPos[i*3] = (Math.random()-0.5)*100; // x
+             vaporPos[i*3+1] = Math.random()*5; // y
+             vaporPos[i*3+2] = (Math.random()-0.5)*100; // z
+        }
+        vaporGeo.setAttribute('position', new THREE.BufferAttribute(vaporPos, 3));
+        const vaporMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.3, transparent: true, opacity: 0 });
+        const vaporSystem = new THREE.Points(vaporGeo, vaporMat);
+        scene.add(vaporSystem);
+
+        // 8. Splash System
+        const splashCount = 1500;
+        const splashGeo = new THREE.BufferGeometry();
+        const splashPos = new Float32Array(splashCount * 3);
+        for(let i=0; i<splashCount*3; i++) splashPos[i] = 0;
+        splashGeo.setAttribute('position', new THREE.BufferAttribute(splashPos, 3));
+        const splashMat = new THREE.PointsMaterial({ color: 0xeeeeee, size: 0.3, transparent: true, opacity: 0.6 });
+        const splashSystem = new THREE.Points(splashGeo, splashMat);
+        splashSystem.visible = false;
+        scene.add(splashSystem);
+
+        // 9. Sun Mesh
+        const sunMesh = new THREE.Mesh(new THREE.SphereGeometry(2, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffaa00 }));
+        sunMesh.position.copy(sunLight.position);
+        scene.add(sunMesh);
+
+        // --- LABEL LOGIC (UPDATED: Static Side Panel) ---
+        const labels = {
+            evap: document.getElementById('label-evap'),
+            cond: document.getElementById('label-cond'),
+            precip: document.getElementById('label-precip')
+        };
+
+        function updateLabels() {
+            // Only update visibility class based on state
+            // Logic: 
+            // Evaporation: visible if Temp > 20
+            if (simState.temperature > 20) labels.evap.classList.add('visible');
+            else labels.evap.classList.remove('visible');
+            
+            // Condensation: visible if Cloud Density > 0.2
+            if (simState.cloudDensity > 0.2) labels.cond.classList.add('visible');
+            else labels.cond.classList.remove('visible');
+            
+            // Precipitation: visible if Raining
+            if (simState.isRaining) {
+                labels.precip.classList.add('visible');
+                // Update text for snow
+                const snowText = 'PRESIPITASI (SALJU)<span>Air membeku jadi kristal es</span>';
+                const rainText = 'PRESIPITASI<span>Air jatuh ke bumi</span>';
+                labels.precip.innerHTML = simState.temperature < 0 ? snowText : rainText;
+            } else {
+                labels.precip.classList.remove('visible');
+            }
+        }
+
+        // --- SIMULATION LOOP ---
+        function updatePhysics() {
+            // Manual controls only update derived states for rain/clouds
+            if (simState.humidity > CONSTANTS.CONDENSE_THRESHOLD) {
+                simState.cloudDensity += 0.005;
+            } else {
+                simState.cloudDensity -= 0.01;
+            }
+            simState.cloudDensity = Math.max(0, Math.min(1, simState.cloudDensity));
+
+            if (simState.cloudDensity > 0.7 && simState.humidity > CONSTANTS.RAIN_THRESHOLD) {
+                simState.isRaining = true;
+                simState.rainIntensity = Math.min(simState.rainIntensity + 0.02, 1.0);
+            } else if (simState.humidity < CONSTANTS.CONDENSE_THRESHOLD || simState.cloudDensity < 0.5) {
+                simState.isRaining = false;
+                simState.rainIntensity = Math.max(simState.rainIntensity - 0.05, 0);
+            }
+        }
+
+        function updateVisuals(deltaTime) {
+            simState.time += deltaTime;
+
+            // Sun & Clouds
+            const sunColor = new THREE.Color().setHSL(0.1 - (simState.sunIntensity * 0.02), 1, 0.5 + (simState.sunIntensity * 0.1));
+            sunMesh.material.color.copy(sunColor);
+            sunLight.intensity = simState.sunIntensity;
+
+            cloudMat.opacity = simState.cloudDensity * 0.8;
+            const cloudGrey = 1.0 - (simState.rainIntensity * 0.6);
+            cloudMat.color.setRGB(cloudGrey, cloudGrey, cloudGrey);
+            cloudGroup.position.x += (simState.windSpeed * 0.001) * deltaTime * 10;
+            if(cloudGroup.position.x > 30) cloudGroup.position.x = -30;
+
+            // Ocean
+            for(let i=0; i<oceanPos.count; i++) {
+                const z = oceanInitialZ[i];
+                const x = oceanPos.getX(i);
+                const waveH = 0.5 + (simState.windSpeed / 100); 
+                const waveVal = Math.sin(x * 0.5 + simState.time * (1 + simState.windSpeed/50)) * waveH;
+                oceanPos.setZ(i, z + waveVal);
+            }
+            oceanPos.needsUpdate = true;
+
+            // Determine Rain vs Snow based on Temp
+            const isSnowing = simState.temperature < 0;
+
+            // Rain Lines
+            rainSystem.visible = simState.isRaining && !isSnowing && simState.rainIntensity > 0.01;
+            if (rainSystem.visible) {
+                const count = Math.floor(simState.rainIntensity * rainCount);
+                rainGeo.setDrawRange(0, count * 2);
+                const windOffset = simState.windSpeed * 0.02;
+                for(let i=0; i<count; i++) {
+                    const ix = i*6;
+                    if(rainPos[ix+1] < 0) {
+                        rainPos[ix] = (Math.random()-0.5)*50;
+                        rainPos[ix+1] = 15 + Math.random()*10;
+                        rainPos[ix+2] = (Math.random()-0.5)*30;
+                        rainPos[ix+3] = rainPos[ix] + windOffset;
+                        rainPos[ix+4] = rainPos[ix+1] - 1.5; 
+                        rainPos[ix+5] = rainPos[ix+2];
+                    } else {
+                        rainPos[ix+1] -= 0.8; 
+                        rainPos[ix+4] -= 0.8;
+                        rainPos[ix] += windOffset * 0.1;
+                        rainPos[ix+3] += windOffset * 0.1;
+                    }
+                }
+                rainGeo.attributes.position.needsUpdate = true;
+            }
+
+            // Snow Particles
+            snowSystem.visible = simState.isRaining && isSnowing && simState.rainIntensity > 0.01;
+            if (snowSystem.visible) {
+                const count = Math.floor(simState.rainIntensity * snowCount);
+                snowParticleGeo.setDrawRange(0, count);
+                const sp = snowParticleGeo.attributes.position.array;
+                const windOffset = simState.windSpeed * 0.01;
+                for(let i=0; i<count; i++) {
+                    const ix = i*3;
+                    if(sp[ix+1] < 0) {
+                        sp[ix] = (Math.random()-0.5)*50;
+                        sp[ix+1] = 15 + Math.random()*5;
+                        sp[ix+2] = (Math.random()-0.5)*30;
+                    } else {
+                        sp[ix+1] -= 0.15; // Slower than rain
+                        sp[ix] += Math.sin(simState.time + i) * 0.02 + windOffset; // Drift
+                        sp[ix+2] += Math.cos(simState.time + i) * 0.02;
+                    }
+                }
+                snowParticleGeo.attributes.position.needsUpdate = true;
+            }
+
+            // Vapor Particles (Evaporation)
+            const isEvaporating = simState.temperature > 20;
+            if(isEvaporating) {
+                vaporMat.opacity = Math.min((simState.temperature - 20) / 30 * 0.5, 0.5); // Max opacity 0.5
+                const vp = vaporGeo.attributes.position.array;
+                for(let i=0; i<vaporCount; i++) {
+                    const ix = i*3;
+                    vp[ix+1] += 0.1; // Rise
+                    if(vp[ix+1] > 10) { // Reset at height
+                        vp[ix+1] = 0;
+                        vp[ix] = (Math.random()-0.5)*60;
+                        vp[ix+2] = (Math.random()-0.5)*60;
+                    }
+                }
+                vaporGeo.attributes.position.needsUpdate = true;
+            } else {
+                vaporMat.opacity = 0;
+            }
+
+            // Splash System
+            splashSystem.visible = simState.isRaining && !isSnowing && simState.rainIntensity > 0.1;
+            if (splashSystem.visible) {
+                 const count = Math.floor(simState.rainIntensity * splashCount);
+                 splashGeo.setDrawRange(0, count);
+                 const sPositions = splashGeo.attributes.position.array;
+                 for(let i=0; i<count; i++) {
+                     if(Math.random() > 0.7) { 
+                         const r = 25 * Math.sqrt(Math.random()); 
+                         const theta = Math.random() * 2 * Math.PI;
+                         const x = r * Math.cos(theta); const z = r * Math.sin(theta);
+                         sPositions[i*3] = x; sPositions[i*3+2] = z;
+                         const dist = Math.sqrt(x*x + z*z);
+                         if(dist < 12) sPositions[i*3+1] = Math.random() * 2; 
+                         else sPositions[i*3+1] = 0.1; 
+                     }
+                 }
+                 splashGeo.attributes.position.needsUpdate = true;
+            }
+
+            // Colors & Sky
+            let r, g, b;
+            const s = simState.soilMoisture;
+            if (s < 40) {
+                const f = s / 40; r = THREE.MathUtils.lerp(0.8, 1.0, f); g = THREE.MathUtils.lerp(0.6, 1.0, f); b = THREE.MathUtils.lerp(0.4, 1.0, f);
+            } else {
+                const f = (s - 40) / 60; r = THREE.MathUtils.lerp(1.0, 0.6, f); g = THREE.MathUtils.lerp(1.0, 0.6, f); b = THREE.MathUtils.lerp(1.0, 0.7, f);
+            }
+            // Snow on ground if freezing
+            if(simState.temperature < 0 && simState.soilMoisture > 50) {
+                 // Blend towards white
+                 r = THREE.MathUtils.lerp(r, 1.0, 0.8);
+                 g = THREE.MathUtils.lerp(g, 1.0, 0.8);
+                 b = THREE.MathUtils.lerp(b, 1.0, 0.8);
+            }
+            islandMat.color.setRGB(r, g, b);
+            
+            const treeColor = s < 20 ? 0x8b4513 : (simState.temperature < 0 ? 0xffffff : 0x228b22);
+            trees.forEach(t => t.leaves.material.color.setHex(treeColor));
+
+            let skyL = 0.5 - (simState.cloudDensity * 0.3);
+            if (simState.isRaining) skyL *= 0.6;
+            const skyColor = new THREE.Color().setHSL(0.6, 0.4, skyL);
+            document.getElementById('canvas-container').style.background = `linear-gradient(to bottom, #${skyColor.getHexString()}, #384252)`;
+        }
+
+        // --- HUD UPDATE ---
+        function updateHUD() {
+            document.getElementById('disp-temp').innerText = simState.temperature.toFixed(1) + "°C";
+            document.getElementById('disp-humidity').innerText = simState.humidity.toFixed(1) + "%";
+            
+            const s = simState.soilMoisture;
+            let sText = "Normal";
+            if (s < 20) sText = "Kering (Bahaya)";
+            else if (s < 40) sText = "Butuh Air";
+            else if (s > 80) sText = "Jenuh Air";
+            document.getElementById('disp-soil').innerText = sText;
+
+            const slTemp = document.getElementById('slider-temp');
+            const slHum = document.getElementById('slider-humidity');
+            const slSoil = document.getElementById('slider-soil');
+
+            if (document.activeElement !== slTemp) slTemp.value = simState.temperature;
+            if (document.activeElement !== slHum) slHum.value = simState.humidity;
+            if (document.activeElement !== slSoil) slSoil.value = simState.soilMoisture;
+
+            const statusElem = document.getElementById('system-status');
+            
+            // [UPDATED] Status Text now shows Hydrological Phase instead of Soil Health
+            if (simState.isRaining) {
+                if (simState.temperature < 0) {
+                    statusElem.innerText = ">> FASE: PRESIPITASI (SALJU)";
+                    statusElem.className = "text-xs font-mono text-cyan-300 animate-pulse";
+                } else {
+                    statusElem.innerText = ">> FASE: PRESIPITASI (HUJAN)";
+                    statusElem.className = "text-xs font-mono text-blue-400 animate-pulse";
+                }
+            } else if (simState.cloudDensity > 0.2) {
+                statusElem.innerText = ">> FASE: KONDENSASI (AWAN)";
+                statusElem.className = "text-xs font-mono text-gray-300";
+            } else if (simState.temperature > 20) {
+                statusElem.innerText = ">> FASE: EVAPORASI (PENGUAPAN)";
+                statusElem.className = "text-xs font-mono text-orange-400";
+            } else {
+                statusElem.innerText = ">> FASE: TENANG (TIDAK AKTIF)";
+                statusElem.className = "text-xs font-mono text-slate-500";
+            }
+        }
+
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            updatePhysics();
+            updateVisuals(delta);
+            updateLabels(); // Update static UI visibility
+            updateHUD();
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // --- INPUT HANDLERS ---
+        document.getElementById('input-sun').addEventListener('input', (e) => {
+            simState.sunIntensity = parseFloat(e.target.value);
+            document.getElementById('val-sun').innerText = simState.sunIntensity + "x";
+        });
+        document.getElementById('input-wind').addEventListener('input', (e) => {
+            simState.windSpeed = parseInt(e.target.value);
+            document.getElementById('val-wind').innerText = simState.windSpeed + " km/h";
+        });
+        document.getElementById('slider-temp').addEventListener('input', (e) => {
+            simState.temperature = parseFloat(e.target.value);
+        });
+        document.getElementById('slider-humidity').addEventListener('input', (e) => {
+            simState.humidity = parseFloat(e.target.value);
+        });
+        document.getElementById('slider-soil').addEventListener('input', (e) => {
+            simState.soilMoisture = parseFloat(e.target.value);
+        });
+
+        window.resetSim = function() {
+            simState.sunIntensity = 1.0; simState.windSpeed = 10; simState.temperature = 25.0; simState.humidity = 50.0;
+            simState.cloudDensity = 0.0; simState.soilMoisture = 60.0; simState.isRaining = false;
+            document.getElementById('input-sun').value = 1; document.getElementById('input-wind').value = 10;
+            document.getElementById('val-sun').innerText = "1.0x"; document.getElementById('val-wind').innerText = "10 km/h";
+        };
+
+        const btnFullscreen = document.getElementById('btn-fullscreen');
+        const wrapper = document.getElementById('viz-wrapper');
+        btnFullscreen.addEventListener('click', async () => {
+             if (!document.fullscreenElement && !wrapper.classList.contains('pseudo-fullscreen')) {
+                 try { await wrapper.requestFullscreen(); } catch (err) { wrapper.classList.add('pseudo-fullscreen'); }
+             } else {
+                 if (document.fullscreenElement) await document.exitFullscreen();
+                 wrapper.classList.remove('pseudo-fullscreen');
+             }
+             setTimeout(() => { window.dispatchEvent(new Event('resize')); }, 100);
+        });
+        window.addEventListener('resize', () => {
+             camera.aspect = container.clientWidth / container.clientHeight;
+             camera.updateProjectionMatrix();
+             renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+    </script>
+</body>
+</html>
